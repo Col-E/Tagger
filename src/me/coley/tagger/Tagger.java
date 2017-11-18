@@ -81,7 +81,8 @@ public class Tagger extends Application implements Callable<Void> {
 		ensureDirectoriesExist();
 		FilteredFiles files = new FilteredFiles(input);
 		files.populate(extensions);
-		files.checkForSave();
+		files.parseOutput();
+		files.runInitialCopies();
 		// Setup java fx
 		primaryStage.setTitle("Tagger");
 		ImageView view = new ImageView(new Image(files.getNext()));
@@ -199,23 +200,19 @@ public class Tagger extends Application implements Callable<Void> {
 
 	class FilteredFiles {
 		/**
-		 * Save file name. If it exits it will be located in the
-		 * {@link me.coley.tagger.Tagger#output output directory}.
-		 */
-		private static final String TAG_SAVE_FILE = "tags.json";
-		/**
 		 * Root directory to search in.
 		 */
 		private final File root;
 		/**
 		 * List of all files matching the {@link me.coley.tagger.Tagger#extensions
-		 * approved extensions}.
+		 * approved extensions} in the {@link me.coley.tagger.Tagger#input input}
+		 * directory.
 		 */
 		private final List<File> files = new ArrayList<>();
 		/**
-		 * Map of all files to their set of tags.
+		 * Map of all files <i>(Original absolute paths)</i> to their set of tags.
 		 */
-		private final Map<File, TagData> tags = new HashMap<>();
+		private final Map<String, TagData> tags = new HashMap<>();
 		/**
 		 * Current index in {@link #files}.
 		 */
@@ -250,26 +247,58 @@ public class Tagger extends Application implements Callable<Void> {
 			if (tag == null) {
 				return;
 			}
-			tags.get(getCurrentFile()).toggle(tag);
+			tags.get(getCurrentFile().getAbsolutePath()).toggle(tag);
 		}
 
 		class TagData {
+			/**
+			 * Indicator in file name for beginning of tags.
+			 */
+			private final static String TAG_FILENAME_START = "__";
+			/**
+			 * Split between tags in the file name.
+			 */
+			private final static String TAG_FILENAME_SPLIT = "-";
+			/**
+			 * Name of the original file.
+			 */
 			private final String baseName;
+			/**
+			 * Extension of the original file.
+			 */
 			private final String extension;
+			/**
+			 * Current file. Updated as tags change the file's name when tags are
+			 * {@link #toggle(String) toggled}.
+			 */
 			private File file;
+			/**
+			 * The set of tags the image has.
+			 */
 			private Set<String> tags = new HashSet<>();
+			/**
+			 * Action to copy the file in the input directory to the output directory. Put
+			 * on hold in initialization and only executed if necessary.
+			 */
+			private Runnable initCopyAction;
 
 			public TagData(File input) {
 				String name = input.getName();
 				this.file = new File(output, name);
 				this.baseName = name.substring(0, name.lastIndexOf("."));
 				this.extension = name.substring(baseName.length());
-				try {
-					Files.copy(Paths.get(input.getAbsolutePath()), Paths.get(file.getAbsolutePath()),
-							StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
-				} catch (IOException e) {
-					fatal("Could not copy file to output directory: " + e.getMessage());
-				}
+				this.initCopyAction = new Runnable() {
+					@Override
+					public void run() {
+						try {
+							// Copy input file to output directory.
+							Files.copy(Paths.get(input.getAbsolutePath()), Paths.get(file.getAbsolutePath()),
+									StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+						} catch (IOException e) {
+							fatal("Could not copy file to output directory: " + e.getMessage());
+						}
+					}
+				};
 			}
 
 			public void toggle(String tag) {
@@ -279,16 +308,22 @@ public class Tagger extends Application implements Callable<Void> {
 				} else {
 					tags.add(tag);
 				}
-				StringBuilder append = new StringBuilder("-");
-				for (String part : tags) {
-					append.append(part + "-");
+				// Create text to append to file name (of the tags)
+				StringBuilder append = new StringBuilder();
+				if (tags.size() > 0) {
+					append.append(TAG_FILENAME_START);
 				}
-				File target = new File(output, baseName + append.toString().substring(0, append.length() - 1) + extension);
+				for (String part : tags) {
+					append.append(part + TAG_FILENAME_SPLIT);
+				}
+				// Create new file
+				String ap = append.length() == 0 ? "" : append.toString().substring(0, append.length() - 1);
+				File target = new File(output, baseName + ap + extension);
 				try {
+					// Move existing file to new file.
+					// Set file to new file.
 					Files.move(Paths.get(file.getAbsolutePath()), Paths.get(target.getAbsolutePath()),
 							StandardCopyOption.REPLACE_EXISTING);
-					System.out.println(file.getAbsolutePath());
-					Files.deleteIfExists(Paths.get(file.getAbsolutePath()));
 					file = target;
 				} catch (IOException e) {
 					fatal("Could not rename file when updating tags: " + e.getMessage());
@@ -308,7 +343,7 @@ public class Tagger extends Application implements Callable<Void> {
 			if (index >= files.size()) {
 				index = 0;
 			}
-			File value = getCurrentFile();			
+			File value = getCurrentFile();
 			return Paths.get(value.getAbsolutePath()).toUri().toURL().toString();
 		}
 
@@ -364,21 +399,63 @@ public class Tagger extends Application implements Callable<Void> {
 					String extension = name.substring(name.lastIndexOf(".") + 1).toLowerCase();
 					if (Arrays.binarySearch(extensions, extension) > -1) {
 						files.add(file);
-						tags.put(file, new TagData(file));
+						tags.put(file.getAbsolutePath(), new TagData(file));
 					}
 				}
 			}
 		}
 
 		/**
-		 * Checks if a save file containing tagging information from a previous session
-		 * exists. If so the current tag map is updated.
+		 * Checks the output directory for existing images. Tag information is then
+		 * pulled from the file names and the current session's tag data is updated.
 		 */
-		public void checkForSave() {
-			File saveFile = new File(output, TAG_SAVE_FILE);
+		public void parseOutput() {
+			File out = new File(output);
+			File in = new File(input);
 			// Check if exists, skip if not found.
-			if (!saveFile.exists()) {
+			if (!out.exists()) {
 				return;
+			}
+			// Iterate files in the output directory
+			for (File file : out.listFiles()) {
+				String name = file.getName();
+				String originalName = name;
+				String[] tags = new String[0];
+				// Extract information from file name.
+				if (name.contains(TagData.TAG_FILENAME_START)) {
+					originalName = name.substring(0, name.indexOf(TagData.TAG_FILENAME_START))
+							+ name.substring(name.lastIndexOf("."));
+					tags = name.substring(
+							name.lastIndexOf(TagData.TAG_FILENAME_START) + TagData.TAG_FILENAME_START.length(),
+							name.lastIndexOf(".")).split(TagData.TAG_FILENAME_SPLIT);
+				}
+				// Check if the original file exists
+				// If so, use it to update the data in the tags map.
+				File original = new File(in, originalName);
+				TagData data = this.tags.get(original.getAbsolutePath());
+				if (data != null) {
+					// Directly add to set since the method will attempt to move files around.
+					for (String tag : tags) {
+						data.tags.add(tag);
+					}
+					// Set init action to null. This prevents later execution of a purposeless
+					// file-copy.
+					data.initCopyAction = null;
+					data.file = file;
+				}
+			}
+		}
+
+		/**
+		 * Executes all remaining copy actions. Ensures files in the input directory
+		 * have a presence in the output directory. If the action is null at this point,
+		 * it has already been verified that it has a presence in the output directory.
+		 */
+		public void runInitialCopies() {
+			for (TagData data : this.tags.values()) {
+				if (data.initCopyAction != null) {
+					data.initCopyAction.run();
+				}
 			}
 		}
 	}
