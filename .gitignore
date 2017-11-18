@@ -1,0 +1,16 @@
+.metadata/**
+.recommenders/**
+.settings/**
+*.class
+*.dtd
+*.sh
+*.bat
+*.json
+*.png
+*.jpeg
+*.jpg
+.classpath
+.project
+bin/**
+temp/**
+target/**
