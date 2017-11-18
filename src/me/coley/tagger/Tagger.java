@@ -64,6 +64,11 @@ public class Tagger extends Application implements Callable<Void> {
 	@CommandLine.Option(names = { "-m", "--max" }, description = "Maximize the program on start.")
 	private boolean maximized;
 	/**
+	 * Whether to set the javafx stage as maximized or not.
+	 */
+	@CommandLine.Option(names = { "-r", "--resize" }, description = "Resize images to fit to program dimensions.")
+	private boolean resize;
+	/**
 	 * Map of javafx KeyCodes to the tags they apply.
 	 */
 	private Map<KeyCode, String> keyToTag = new HashMap<>();
@@ -83,9 +88,13 @@ public class Tagger extends Application implements Callable<Void> {
 		files.populate(extensions);
 		files.parseOutput();
 		files.runInitialCopies();
-		// Setup java fx
+		// Setup java fx ui
 		primaryStage.setTitle("Tagger");
 		ImageView view = new ImageView(new Image(files.getNext()));
+		if (resize) {
+			view.fitWidthProperty().bind(primaryStage.widthProperty());
+			view.fitHeightProperty().bind(primaryStage.heightProperty());
+		}
 		StackPane root = new StackPane();
 		root.getChildren().add(view);
 		Scene scene = new Scene(root, 720, 576);
