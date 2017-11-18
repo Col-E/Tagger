@@ -1,14 +1,13 @@
 .metadata/**
 .recommenders/**
 .settings/**
+img/**
+out/**
 *.class
 *.dtd
 *.sh
 *.bat
 *.json
-*.png
-*.jpeg
-*.jpg
 .classpath
 .project
 bin/**
