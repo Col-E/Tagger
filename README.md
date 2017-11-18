@@ -14,5 +14,5 @@ Usage: me.coley.tagger.Tagger [-m] <input> <output> <extensions>...
   
 Example: me.coley.tagger.Tagger images output png jpg jpeg
       Searches for images in the directory "images" with the extensions "png", "jpg", and "jpeg"
-	  Saves tagged images in the directory "output"
+      Saves tagged images in the directory "output"
 ```

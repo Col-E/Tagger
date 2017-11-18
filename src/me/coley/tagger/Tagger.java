@@ -9,8 +9,10 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.net.MalformedURLException;
 import java.nio.charset.Charset;
+import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -76,6 +78,7 @@ public class Tagger extends Application implements Callable<Void> {
 		CommandLine.call(this, System.out, this.getParameters().getRaw().toArray(new String[0]));
 		// Setup file and tag systems
 		loadTagActionKeys();
+		ensureDirectoriesExist();
 		FilteredFiles files = new FilteredFiles(input);
 		files.populate(extensions);
 		files.checkForSave();
@@ -102,7 +105,7 @@ public class Tagger extends Application implements Callable<Void> {
 					}
 					// Update tags
 					else {
-						files.addTag(keyToTag.get(vk));
+						files.toggle(keyToTag.get(vk));
 					}
 				} catch (MalformedURLException e) {
 					err("Could not create path to file: " + e.getMessage());
@@ -144,6 +147,20 @@ public class Tagger extends Application implements Callable<Void> {
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
+		}
+	}
+
+	/**
+	 * Ensures the input and output directories exist.
+	 */
+	private void ensureDirectoriesExist() {
+		File in = new File(input);
+		File out = new File(output);
+		if (!in.exists()) {
+			in.mkdirs();
+		}
+		if (!out.exists()) {
+			out.mkdirs();
 		}
 	}
 
@@ -198,11 +215,11 @@ public class Tagger extends Application implements Callable<Void> {
 		/**
 		 * Map of all files to their set of tags.
 		 */
-		private final Map<File, Set<String>> tags = new HashMap<>();
+		private final Map<File, TagData> tags = new HashMap<>();
 		/**
 		 * Current index in {@link #files}.
 		 */
-		private int index;
+		private int index = -1;
 
 		/**
 		 * Construct FilteredFiles with given directory to use as root for searches.
@@ -228,12 +245,55 @@ public class Tagger extends Application implements Callable<Void> {
 		 * @param tag
 		 *            Tag to apply.
 		 */
-		public void addTag(String tag) {
+		public void toggle(String tag) {
 			// If invalid tag, do not apply
 			if (tag == null) {
 				return;
 			}
-			tags.get(getCurrentFile()).add(tag);
+			tags.get(getCurrentFile()).toggle(tag);
+		}
+
+		class TagData {
+			private final String baseName;
+			private final String extension;
+			private File file;
+			private Set<String> tags = new HashSet<>();
+
+			public TagData(File input) {
+				String name = input.getName();
+				this.file = new File(output, name);
+				this.baseName = name.substring(0, name.lastIndexOf("."));
+				this.extension = name.substring(baseName.length());
+				try {
+					Files.copy(Paths.get(input.getAbsolutePath()), Paths.get(file.getAbsolutePath()),
+							StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+				} catch (IOException e) {
+					fatal("Could not copy file to output directory: " + e.getMessage());
+				}
+			}
+
+			public void toggle(String tag) {
+				// Toggle tag status
+				if (tags.contains(tag)) {
+					tags.remove(tag);
+				} else {
+					tags.add(tag);
+				}
+				StringBuilder append = new StringBuilder("-");
+				for (String part : tags) {
+					append.append(part + "-");
+				}
+				File target = new File(output, baseName + append.toString().substring(0, append.length() - 1) + extension);
+				try {
+					Files.move(Paths.get(file.getAbsolutePath()), Paths.get(target.getAbsolutePath()),
+							StandardCopyOption.REPLACE_EXISTING);
+					System.out.println(file.getAbsolutePath());
+					Files.deleteIfExists(Paths.get(file.getAbsolutePath()));
+					file = target;
+				} catch (IOException e) {
+					fatal("Could not rename file when updating tags: " + e.getMessage());
+				}
+			}
 		}
 
 		/**
@@ -244,11 +304,11 @@ public class Tagger extends Application implements Callable<Void> {
 		 *             Thrown if the url to the file could not be made.
 		 */
 		public String getNext() throws MalformedURLException {
-			File value = getCurrentFile();
 			index++;
 			if (index >= files.size()) {
 				index = 0;
 			}
+			File value = getCurrentFile();			
 			return Paths.get(value.getAbsolutePath()).toUri().toURL().toString();
 		}
 
@@ -260,11 +320,11 @@ public class Tagger extends Application implements Callable<Void> {
 		 *             Thrown if the url to the file could not be made.
 		 */
 		public String getPrevious() throws MalformedURLException {
-			File value = files.get(index);
 			index--;
 			if (index == -1) {
 				index = files.size() - 1;
 			}
+			File value = files.get(index);
 			return Paths.get(value.getAbsolutePath()).toUri().toURL().toString();
 		}
 
@@ -304,7 +364,7 @@ public class Tagger extends Application implements Callable<Void> {
 					String extension = name.substring(name.lastIndexOf(".") + 1).toLowerCase();
 					if (Arrays.binarySearch(extensions, extension) > -1) {
 						files.add(file);
-						tags.put(file, new HashSet<>());
+						tags.put(file, new TagData(file));
 					}
 				}
 			}
@@ -321,7 +381,6 @@ public class Tagger extends Application implements Callable<Void> {
 				return;
 			}
 		}
-
 	}
 
 	/**
