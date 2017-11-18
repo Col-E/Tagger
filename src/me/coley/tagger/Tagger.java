@@ -9,7 +9,6 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.net.MalformedURLException;
 import java.nio.charset.Charset;
-import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
@@ -23,15 +22,22 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import com.eclipsesource.json.Json;
 import com.eclipsesource.json.JsonValue;
+import com.eclipsesource.json.ParseException;
+
+import javafx.animation.FadeTransition;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.event.EventHandler;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.control.Label;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 import picocli.CommandLine;
 
 /**
@@ -95,8 +101,11 @@ public class Tagger extends Application implements Callable<Void> {
 			view.fitWidthProperty().bind(primaryStage.widthProperty());
 			view.fitHeightProperty().bind(primaryStage.heightProperty());
 		}
+		Label notification = new Label("");
+		notification.setStyle("-fx-font-size: 20px; -fx-padding: 5px; -fx-font-weight: bold; -fx-text-fill: #FFFFFF; -fx-effect: dropshadow(gaussian,rgba(0,0,0,1),2,0,1,1);");
+		StackPane.setAlignment(notification, Pos.BOTTOM_LEFT);
 		StackPane root = new StackPane();
-		root.getChildren().add(view);
+		root.getChildren().addAll(view, notification);
 		Scene scene = new Scene(root, 720, 576);
 		scene.setOnKeyPressed(new EventHandler<KeyEvent>() {
 			@Override
@@ -117,6 +126,19 @@ public class Tagger extends Application implements Callable<Void> {
 					else {
 						files.toggle(keyToTag.get(vk));
 					}
+					// Display tags
+					Platform.runLater(new Runnable() {
+						@Override
+						public void run() {
+							// Fade notification and update with appropriate tags
+							notification.setText(files.getTitle());
+							FadeTransition ft = new FadeTransition(Duration.millis(3000), notification);
+							ft.setFromValue(1.0);
+							ft.setToValue(0.0);
+							ft.setCycleCount(1);
+							ft.play();
+						}
+					});
 				} catch (MalformedURLException e) {
 					err("Could not create path to file: " + e.getMessage());
 				}
@@ -128,10 +150,9 @@ public class Tagger extends Application implements Callable<Void> {
 	}
 
 	/**
-	 * 
-	 * @throws FileNotFoundException
+	 * Loads key-to-tag information from the config json.
 	 */
-	private void loadTagActionKeys() throws FileNotFoundException {
+	private void loadTagActionKeys() {
 		File keyActionFile = new File(System.getProperty("user.dir") + File.separator + TAG_KEYS);
 		if (!keyActionFile.exists()) {
 			// If the key-to-action file does not exist, save an example file.
@@ -155,8 +176,9 @@ public class Tagger extends Application implements Callable<Void> {
 			});
 			log("}");
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			fatal("Could not read from config file: " + keyActionFile.getAbsolutePath());
+		} catch (ParseException e) {
+			fatal("Syntax error in config file: [Line " + e.getLine() + ", Column " + e.getColumn() + "]");
 		}
 	}
 
@@ -259,85 +281,13 @@ public class Tagger extends Application implements Callable<Void> {
 			tags.get(getCurrentFile().getAbsolutePath()).toggle(tag);
 		}
 
-		class TagData {
-			/**
-			 * Indicator in file name for beginning of tags.
-			 */
-			private final static String TAG_FILENAME_START = "__";
-			/**
-			 * Split between tags in the file name.
-			 */
-			private final static String TAG_FILENAME_SPLIT = "-";
-			/**
-			 * Name of the original file.
-			 */
-			private final String baseName;
-			/**
-			 * Extension of the original file.
-			 */
-			private final String extension;
-			/**
-			 * Current file. Updated as tags change the file's name when tags are
-			 * {@link #toggle(String) toggled}.
-			 */
-			private File file;
-			/**
-			 * The set of tags the image has.
-			 */
-			private Set<String> tags = new HashSet<>();
-			/**
-			 * Action to copy the file in the input directory to the output directory. Put
-			 * on hold in initialization and only executed if necessary.
-			 */
-			private Runnable initCopyAction;
-
-			public TagData(File input) {
-				String name = input.getName();
-				this.file = new File(output, name);
-				this.baseName = name.substring(0, name.lastIndexOf("."));
-				this.extension = name.substring(baseName.length());
-				this.initCopyAction = new Runnable() {
-					@Override
-					public void run() {
-						try {
-							// Copy input file to output directory.
-							Files.copy(Paths.get(input.getAbsolutePath()), Paths.get(file.getAbsolutePath()),
-									StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
-						} catch (IOException e) {
-							fatal("Could not copy file to output directory: " + e.getMessage());
-						}
-					}
-				};
-			}
-
-			public void toggle(String tag) {
-				// Toggle tag status
-				if (tags.contains(tag)) {
-					tags.remove(tag);
-				} else {
-					tags.add(tag);
-				}
-				// Create text to append to file name (of the tags)
-				StringBuilder append = new StringBuilder();
-				if (tags.size() > 0) {
-					append.append(TAG_FILENAME_START);
-				}
-				for (String part : tags) {
-					append.append(part + TAG_FILENAME_SPLIT);
-				}
-				// Create new file
-				String ap = append.length() == 0 ? "" : append.toString().substring(0, append.length() - 1);
-				File target = new File(output, baseName + ap + extension);
-				try {
-					// Move existing file to new file.
-					// Set file to new file.
-					Files.move(Paths.get(file.getAbsolutePath()), Paths.get(target.getAbsolutePath()),
-							StandardCopyOption.REPLACE_EXISTING);
-					file = target;
-				} catch (IOException e) {
-					fatal("Could not rename file when updating tags: " + e.getMessage());
-				}
-			}
+		/**
+		 * 
+		 * @return
+		 */
+		public String getTitle() {
+			String tagArray = Arrays.toString(tags.get(getCurrentFile().getAbsolutePath()).tags.toArray());
+			return "Tags: " + tagArray;
 		}
 
 		/**
@@ -464,6 +414,93 @@ public class Tagger extends Application implements Callable<Void> {
 			for (TagData data : this.tags.values()) {
 				if (data.initCopyAction != null) {
 					data.initCopyAction.run();
+				}
+			}
+		}
+
+		/**
+		 * Container for a file in the output directory with tag data.
+		 * 
+		 * @author Matt Coley
+		 * @since 11/17/2017
+		 */
+		class TagData {
+			/**
+			 * Indicator in file name for beginning of tags.
+			 */
+			private final static String TAG_FILENAME_START = "__";
+			/**
+			 * Split between tags in the file name.
+			 */
+			private final static String TAG_FILENAME_SPLIT = "-";
+			/**
+			 * Name of the original file.
+			 */
+			private final String baseName;
+			/**
+			 * Extension of the original file.
+			 */
+			private final String extension;
+			/**
+			 * Current file. Updated as tags change the file's name when tags are
+			 * {@link #toggle(String) toggled}.
+			 */
+			private File file;
+			/**
+			 * The set of tags the image has.
+			 */
+			private Set<String> tags = new HashSet<>();
+			/**
+			 * Action to copy the file in the input directory to the output directory. Put
+			 * on hold in initialization and only executed if necessary.
+			 */
+			private Runnable initCopyAction;
+
+			public TagData(File input) {
+				String name = input.getName();
+				this.file = new File(output, name);
+				this.baseName = name.substring(0, name.lastIndexOf("."));
+				this.extension = name.substring(baseName.length());
+				this.initCopyAction = new Runnable() {
+					@Override
+					public void run() {
+						try {
+							// Copy input file to output directory.
+							Files.copy(Paths.get(input.getAbsolutePath()), Paths.get(file.getAbsolutePath()),
+									StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+						} catch (IOException e) {
+							fatal("Could not copy file to output directory: " + e.getMessage());
+						}
+					}
+				};
+			}
+
+			public void toggle(String tag) {
+				// Toggle tag status
+				if (tags.contains(tag)) {
+					tags.remove(tag);
+				} else {
+					tags.add(tag);
+				}
+				// Create text to append to file name (of the tags)
+				StringBuilder append = new StringBuilder();
+				if (tags.size() > 0) {
+					append.append(TAG_FILENAME_START);
+				}
+				for (String part : tags) {
+					append.append(part + TAG_FILENAME_SPLIT);
+				}
+				// Create new file
+				String ap = append.length() == 0 ? "" : append.toString().substring(0, append.length() - 1);
+				File target = new File(output, baseName + ap + extension);
+				try {
+					// Move existing file to new file.
+					// Set file to new file.
+					Files.move(Paths.get(file.getAbsolutePath()), Paths.get(target.getAbsolutePath()),
+							StandardCopyOption.REPLACE_EXISTING);
+					file = target;
+				} catch (IOException e) {
+					fatal("Could not rename file when updating tags: " + e.getMessage());
 				}
 			}
 		}
