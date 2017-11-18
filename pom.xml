@@ -2,7 +2,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>me.coley</groupId>
 	<artifactId>tagger</artifactId>
-	<version>0.1</version>
+	<version>1.0</version>
 	<name>Tagger</name>
 	<description>Simple program for organizing and tagging images.</description>
 	<dependencies>

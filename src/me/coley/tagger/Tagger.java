@@ -62,7 +62,7 @@ public class Tagger extends Application implements Callable<Void> {
 	/**
 	 * Array of extensions to allow during file searches.
 	 */
-	@CommandLine.Parameters(index = "2", description = "Comma separated extensions to use.", arity = "2..*")
+	@CommandLine.Parameters(index = "2", description = "Comma separated extensions to use.", arity = "1..*")
 	private String[] extensions;
 	/**
 	 * Whether to set the javafx stage as maximized or not.
@@ -89,12 +89,13 @@ public class Tagger extends Application implements Callable<Void> {
 		CommandLine.call(this, System.out, this.getParameters().getRaw().toArray(new String[0]));
 		// Setup file and tag systems
 		loadTagActionKeys();
-		ensureDirectoriesExist();
+		ensureProperInputs();
 		FilteredFiles files = new FilteredFiles(input);
 		files.populate(extensions);
 		files.parseOutput();
 		files.runInitialCopies();
 		// Setup java fx ui
+		log("Displaying...");
 		primaryStage.setTitle("Tagger");
 		ImageView view = new ImageView(new Image(files.getNext()));
 		if (resize) {
@@ -183,9 +184,20 @@ public class Tagger extends Application implements Callable<Void> {
 	}
 
 	/**
-	 * Ensures the input and output directories exist.
+	 * Ensures the parameters are correct.
 	 */
-	private void ensureDirectoriesExist() {
+	private void ensureProperInputs() {
+		// Check if parameters are null. If so, quit.
+		if (input == null ) {	
+			fatal("You need to specify an input directory.");
+		}
+		if (output == null ) {	
+			fatal("You need to specify an output directory.");
+		}
+		if (extensions == null ) {	
+			fatal("You need to specify your extension types.");
+		}
+		// Check if in and output folders exist.
 		File in = new File(input);
 		File out = new File(output);
 		if (!in.exists()) {
@@ -330,6 +342,7 @@ public class Tagger extends Application implements Callable<Void> {
 		 *            Approved extensions.
 		 */
 		public void populate(String[] extensions) {
+			log("Populating image set...");
 			Arrays.sort(extensions);
 			populate(root, extensions);
 		}
@@ -369,6 +382,7 @@ public class Tagger extends Application implements Callable<Void> {
 		 * pulled from the file names and the current session's tag data is updated.
 		 */
 		public void parseOutput() {
+			log("Scanning output directory for existing tag data...");
 			File out = new File(output);
 			File in = new File(input);
 			// Check if exists, skip if not found.
@@ -411,6 +425,7 @@ public class Tagger extends Application implements Callable<Void> {
 		 * it has already been verified that it has a presence in the output directory.
 		 */
 		public void runInitialCopies() {
+			log("Copying missing files to output directory...");
 			for (TagData data : this.tags.values()) {
 				if (data.initCopyAction != null) {
 					data.initCopyAction.run();
